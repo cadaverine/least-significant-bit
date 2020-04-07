@@ -6,13 +6,13 @@ import (
 	"image"
 	"io/ioutil"
 	"log"
+	"os"
 
 	"golang.org/x/image/bmp"
 )
 
 const (
-	testMessage = "Hello, world!"
-	byteSize    = 8
+	byteSize = 8
 )
 
 func openBMP(path string) (image.Image, image.Config, error) {
@@ -52,7 +52,8 @@ func getEncodedBytes(data []byte, message string, terminateSymbol rune) ([]byte,
 		for j := 0; j < byteSize; j++ {
 			idx := i*byteSize + j
 			bit := char & (1 << j)
-			encoded[idx] = encoded[idx] | (bit >> j)
+
+			encoded[idx] = (encoded[idx] &^ 1) | (bit >> j)
 		}
 	}
 
@@ -60,8 +61,6 @@ func getEncodedBytes(data []byte, message string, terminateSymbol rune) ([]byte,
 }
 
 func getDecodedMessage(data []byte, terminateSymbol rune) string {
-	fmt.Printf("%16b", terminateSymbol)
-
 	maxLength := len(data) / byteSize
 	msgBytes := make([]byte, 0)
 
@@ -77,41 +76,17 @@ func getDecodedMessage(data []byte, terminateSymbol rune) string {
 			break
 		}
 
-		fmt.Printf("%08b: %+v\n", char, char)
-
-		if i == 10 {
-			break
-		}
-
 		msgBytes = append(msgBytes, char)
 	}
 
 	return string(msgBytes)
 }
 
-func encodeMessage(message, terminateSymbol string, img image.Image) (image.Image, error) {
-	return nil, nil
-}
-
-func decodeMessage(message string, img image.Image) (image.Image, error) {
-	return nil, nil
-}
-
-func main() {
-	img2, conf, err := openBMP("images/sample.bmp")
-	fmt.Printf("%+v\n", conf)
-
-	// fmt.Printf("%+v", imgConfig)
-
-	// pixels := make([]byte, 100*100)
-
-	// img := image.NewGray(image.Rect(0, 0, 100, 100))
-	// img.Pix = pixels
-
-	// img = &image.Gray{Pix: pixels, Stride: 100, Rect: image.Rect(0, 0, 100, 100)}
-
-	// img = image.NewGray(image.Rect(0, 0, 100, 100))
-	// copy(img.Pix, pixels)
+func cloneImage(path string) (*image.NRGBA, error) {
+	img, conf, err := openBMP(path)
+	if err != nil {
+		return nil, err
+	}
 
 	width := conf.Width
 	height := conf.Height
@@ -119,31 +94,62 @@ func main() {
 	upLeft := image.Point{0, 0}
 	lowRight := image.Point{width, height}
 
-	img := image.NewRGBA(image.Rectangle{upLeft, lowRight})
-
-	// Colors are defined by Red, Green, Blue, Alpha uint8 values.
-	// cyan := color.RGBA{100, 200, 200, 0xff}
+	newImg := image.NewNRGBA(image.Rectangle{upLeft, lowRight})
 
 	for x := 0; x < width; x++ {
 		for y := 0; y < height; y++ {
-			img.Set(x, y, img2.At(x, y))
+			newImg.Set(x, y, img.At(x, y))
 		}
 	}
 
-	a := make([]byte, 2000)
+	return newImg, nil
+}
 
-	// encoded, err := getEncodedBytes(img.Pix, "Test text!!!", '#')
-	encoded, err := getEncodedBytes(a, "Test text!!!", '#')
+func encodeMessageToImage(sourcePath, resultPath, message string) error {
+	img, err := cloneImage(sourcePath)
+	if err != nil {
+		return err
+	}
+
+	img.Pix, err = getEncodedBytes(img.Pix, message, '#')
+	if err != nil {
+		return err
+	}
+
+	file, err := os.Create(resultPath)
+	if err != nil {
+		return err
+	}
+
+	return bmp.Encode(file, img)
+}
+
+func decodeMessageFromImage(path string) (string, error) {
+	img, _, err := openBMP(path)
+	if err != nil {
+		return "", err
+	}
+
+	encoded := img.(*image.NRGBA)
+	message := getDecodedMessage(encoded.Pix, '#')
+
+	return message, nil
+}
+
+func main() {
+	sourcePath := "images/samples/VENUS.BMP"
+	resultPath := "images/encoded/result.bmp"
+	message := "Hello, world!"
+
+	err := encodeMessageToImage(sourcePath, resultPath, message)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// img.Pix = encoded
+	decodedMessage, err := decodeMessageFromImage(resultPath)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// f, _ := os.Create("images/encoded.bmp")
-	// bmp.Encode(f, img)
-
-	// fmt.Println(getDecodedMessage(img.Pix, '#'))
-	fmt.Println(getDecodedMessage(encoded, '#'))
-
+	fmt.Printf("Decoded message is: '%s'\n", decodedMessage)
 }
