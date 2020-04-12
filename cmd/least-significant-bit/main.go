@@ -38,11 +38,15 @@ func openBMP(path string) (image.Image, image.Config, error) {
 	return img, imgConfig, nil
 }
 
-func getEncodedBytes(data []byte, message string, terminateSymbol rune) ([]byte, error) {
+func getEncodedBytes(data []byte, message string, terminateSymbol rune, period, offset int) ([]byte, error) {
 	msg := fmt.Sprintf("%s%s", message, string(terminateSymbol))
 
-	if len(msg)*byteSize > len(data) {
+	if len(msg)*byteSize*period > len(data) {
 		return nil, fmt.Errorf("message is to long, need %v bytes", len(msg)*byteSize)
+	}
+
+	if period == 0 || offset > period {
+		return nil, fmt.Errorf("period must be greater than 0 and greater than index")
 	}
 
 	encoded := make([]byte, len(data))
@@ -50,7 +54,9 @@ func getEncodedBytes(data []byte, message string, terminateSymbol rune) ([]byte,
 
 	for i, char := range []byte(msg) {
 		for j := 0; j < byteSize; j++ {
-			idx := i*byteSize + j
+			k := i*byteSize + j
+			idx := k*period + offset
+
 			bit := char & (1 << j)
 
 			encoded[idx] = (encoded[idx] &^ 1) | (bit >> j)
@@ -60,15 +66,18 @@ func getEncodedBytes(data []byte, message string, terminateSymbol rune) ([]byte,
 	return encoded, nil
 }
 
-func getDecodedMessage(data []byte, terminateSymbol rune) string {
-	maxLength := len(data) / byteSize
+func getDecodedMessage(data []byte, terminateSymbol rune, period, offset int) string {
+	maxLength := len(data) / (byteSize * period)
 	msgBytes := make([]byte, 0)
 
 	for i := 0; i < maxLength; i++ {
 		var char byte
 
 		for j := 0; j < byteSize; j++ {
-			bit := data[i*byteSize+j] & 1
+			k := i*byteSize + j
+			idx := k*period + offset
+
+			bit := data[idx] & 1
 			char = char | (bit << j)
 		}
 
@@ -82,7 +91,7 @@ func getDecodedMessage(data []byte, terminateSymbol rune) string {
 	return string(msgBytes)
 }
 
-func cloneImage(path string) (*image.NRGBA, error) {
+func cloneImage(path string) (*image.RGBA, error) {
 	img, conf, err := openBMP(path)
 	if err != nil {
 		return nil, err
@@ -94,7 +103,7 @@ func cloneImage(path string) (*image.NRGBA, error) {
 	upLeft := image.Point{0, 0}
 	lowRight := image.Point{width, height}
 
-	newImg := image.NewNRGBA(image.Rectangle{upLeft, lowRight})
+	newImg := image.NewRGBA(image.Rectangle{upLeft, lowRight})
 
 	for x := 0; x < width; x++ {
 		for y := 0; y < height; y++ {
@@ -105,13 +114,13 @@ func cloneImage(path string) (*image.NRGBA, error) {
 	return newImg, nil
 }
 
-func encodeMessageToImage(sourcePath, resultPath, message string) error {
+func encodeMessageToImage(sourcePath, resultPath, message string, period, offset int) error {
 	img, err := cloneImage(sourcePath)
 	if err != nil {
 		return err
 	}
 
-	img.Pix, err = getEncodedBytes(img.Pix, message, '#')
+	img.Pix, err = getEncodedBytes(img.Pix, message, '#', period, offset)
 	if err != nil {
 		return err
 	}
@@ -124,14 +133,14 @@ func encodeMessageToImage(sourcePath, resultPath, message string) error {
 	return bmp.Encode(file, img)
 }
 
-func decodeMessageFromImage(path string) (string, error) {
+func decodeMessageFromImage(path string, period, offset int) (string, error) {
 	img, _, err := openBMP(path)
 	if err != nil {
 		return "", err
 	}
 
-	encoded := img.(*image.NRGBA)
-	message := getDecodedMessage(encoded.Pix, '#')
+	encoded := img.(*image.RGBA)
+	message := getDecodedMessage(encoded.Pix, '#', period, offset)
 
 	return message, nil
 }
@@ -139,14 +148,20 @@ func decodeMessageFromImage(path string) (string, error) {
 func main() {
 	sourcePath := "images/samples/VENUS.BMP"
 	resultPath := "images/encoded/result.bmp"
+
 	message := "Hello, world!"
 
-	err := encodeMessageToImage(sourcePath, resultPath, message)
+	// 4 компоненты - R, G, B, A
+	period := 4
+	// для кодирования выбираем компоненту G
+	offset := 1
+
+	err := encodeMessageToImage(sourcePath, resultPath, message, period, offset)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	decodedMessage, err := decodeMessageFromImage(resultPath)
+	decodedMessage, err := decodeMessageFromImage(resultPath, period, offset)
 	if err != nil {
 		log.Fatal(err)
 	}
